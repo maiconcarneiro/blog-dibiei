@@ -38,6 +38,25 @@ FREEPDB1 =
   )
 " >> /opt/oracle/product/23c/dbhomeFree/network/admin/tnsnames.ora
 
-# 7) Opcional: testa conexao
+# 7) Cria o esquema de exemplo HR
 su - oracle
-sqlplus system/oracle@freepdb1
+
+curl -L -o sample_schemas.zip https://github.com/oracle-samples/db-sample-schemas/archive/refs/tags/v23.1.zip
+unzip sample_schemas.zip
+
+sqlplus system/oracle@freepdb1 <<EOF
+create user hr identified by oracle quota unlimited on users;
+grant DB_DEVELOPER_ROLE to hr;
+
+conn hr/oracle@freepdb1 
+@db-sample-schemas-23.1/human_resources/hr_create.sql
+@db-sample-schemas-23.1/human_resources/hr_populate.sql
+@db-sample-schemas-23.1/human_resources/hr_code.sql
+
+set pages 100
+set lines 400
+col object_name format a30
+col object_type format a20
+select object_type, object_name, created, status from user_objects order by 1;
+quit;
+EOF
