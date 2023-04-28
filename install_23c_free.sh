@@ -1,5 +1,3 @@
-#!/bin/bash
-
 # 1) add o IP e hostname no /etc/hosts
 export IP_ATUAL=$(ip a | grep -A2 "ether" | grep inet | awk '{print $2}' | awk -F "/" '{print $1}')
 export HOSTNAME_ATUAL=$(hostname)
