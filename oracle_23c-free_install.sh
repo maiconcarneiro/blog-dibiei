@@ -1,13 +1,16 @@
 #!/bin/bash
 # Maicon Carneiro - Salvador BA | 27/04/2023.
 
+systemctl stop firewalld
+systemctl disable firewalld
+
 # 1) add o IP e hostname no /etc/hosts
 export IP_ATUAL=$(ip a | grep -A2 "ether" | grep inet | awk '{print $2}' | awk -F "/" '{print $1}')
 export HOSTNAME_ATUAL=$(hostname)
 echo "$IP_ATUAL $HOSTNAME_ATUAL" >> /etc/hosts
 
 # 2) preinstall
-dnf update -y
+#dnf update -y
 dnf install -y oraclelinux-developer-release-el8
 dnf config-manager --set-enabled ol8_developer
 dnf -y install oracle-database-preinstall-23c
