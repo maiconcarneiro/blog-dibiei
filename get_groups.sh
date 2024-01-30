@@ -1,11 +1,9 @@
 ## script: get_groups.sh v1.3
-## syntax: "./get_groups.sh" or  "./get_groups.sh <ORACLE_HOME_PATH>" or "./get_groups.sh all"
+## syntax: "./get_groups.sh" or  "./get_groups.sh -home <ORACLE_HOME_PATH>" or "./get_groups.sh -home all"
 ##  ./get_groups.sh use the current $ORACLE_HOME as default path.
 ##
-## Example:
-#   $ ./get_groups.sh
-#   OSDBA=oinstall,OSOPER=oinstall,OSASM=oinstall,OSBACKUP=oinstall,OSDG=oinstall,OSKM=oinstall,OSRAC=oinstall
-#
+## https://dibiei.blog/2024/01/30/script-get_groups-sh-listando-os-grupos-de-so-de-um-oracle_home/
+##
 ## Maicon Carneiro - dibiei.blog
 ## 11/01/2024 - v1.0 with FPP format standard
 ## 27/01/2024 - v1.1 support for multiple Oracle Home reading /etc/oratab
@@ -25,7 +23,7 @@ RESULT_TYPE="FPP"
 # show script help usage
 show_help() {
     echo "Uso: $0 [-home <Oracle Home Path>] [-oui]"
-    echo "  -home    : Oracle Home Path. Example: /u01/app/oracle/product/19.0.0/dbhome_1"
+    echo "  -home    : Oracle Home Patch. Example: /u01/app/oracle/product/19.0.0/dbhome_1"
     echo "  -oui     : Get the result with OUI format instead of FPP format"
     exit 1
 }
@@ -50,6 +48,12 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
+
+# Default Binary type (RDBMS or GRID)
+BINARY_TYPE="RDBMS"
+
+# YES for Fleet Patching and Provisioning (FPP) standard
+FORCE_OSPER_GRP="YES"
 
 
 addGroupValueFPP()
@@ -84,13 +88,6 @@ addGroupValueOUI()
 
 
 runGetGroups(){
-
-# Default Binary type (RDBMS or GRID)
-BINARY_TYPE="RDBMS"
-
-# YES for Fleet Patching and Provisioning (FPP) standard
-FORCE_OSPER_GRP="YES"
-
 
 if [ ! -z "$2" ]; then
  LIST_TYPE=$2
