@@ -306,7 +306,7 @@ echo "$LINES_COUNT"
 }
 
 echo ""
-echo "=========================== Analyzer Session Summary =============================="
+echo "===================================== Summary ====================================="
 echo "Log File Name........: $LogFileName"
 echo "Filter...............: $filter"
 echo "Filter file..........: $filter_file"
