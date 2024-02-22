@@ -1,8 +1,8 @@
 #!/bin/bash
 # lsnr_miner.sh - v1.5
-# Script to analyze Oracle Listener log file applying filters and provide the connections count in differents c
+# Script to analyze Oracle Listener log file applying filters and provide the connections count in different levels. 
 #
-# Maicon Carneiro (dibiei.com)
+# Maicon Carneiro (dibiei.blog)
 #
 # Date       | Author             | Change
 # ----------- -------------------- -----------------------------------------------------------
