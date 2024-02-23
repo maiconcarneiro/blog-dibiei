@@ -1,18 +1,21 @@
 #!/bin/bash
-# lsnr_miner.sh - v1.5
-# Script to analyze Oracle Listener log file applying filters and provide the connections count in different levels. 
+# lsnr_miner.sh - v1.6
+# Script to analyze Oracle Listener log file by applying advanced filters and provide connection count at different levels.
 #
-# Maicon Carneiro (dibiei.blog)
+# Author: Maicon Carneiro (dibiei.blog)
 #
 # Date       | Author             | Change
 # ----------- -------------------- -----------------------------------------------------------
-# 20/04/2024 | Maicon Carneiro    | v1 based on the script "lsnr_clients.sh"
-# 21/04/2024 | Maicon Carneiro    | Support to Timestamp filter
+# 20/02/2024 | Maicon Carneiro    | v1 based on the script "lsnr_clients.sh"
+# 21/02/2024 | Maicon Carneiro    | Support to Timestamp filter
+# 22/02/2024 | Maicon Carneiro    | Support to save_filter and CSV improvements
 
-SUPPORTED_ATTR="IP|PROGRAM|USER|SERVICE_NAME"
+SUPPORTED_FILE_CHARACTERS='^[a-zA-Z0-9_.-]+$'
+SUPPORTED_ATTR="IP|HOST|PROGRAM|USER|SERVICE_NAME"
 SUPPORTED_TIMESTAMP_FORMAT="'DD-MON-YYYY' | 'DD-MON-YYYY HH' | 'DD-MON-YYYY HH:MI' | 'DD-MON-YYYY HH:MI:SS'"
 LogFileName=""
 resultFormat="Table"
+CSV_DELIMITER=","
 dtLog=$(date +'%Y%m%d_%H%M%S')
 
 filter_attr=""
@@ -23,6 +26,14 @@ group_by="TIMESTAMP"
 group_format="DD-MON-YYYY HH:MI"
 BEGIN_TIMESTAMP=""
 END_TIMESTAMP=""
+SAVE_FILTER_FILE=""
+
+FILE_DATE=$(date +'%H%M%S')
+CONNECTIONS_FILE="lsminer.$FILE_DATE.conn.txt"
+FILE_LIST_ITEM="lsminer.$FILE_DATE.list.txt"
+COUNT_HELPER_FILE="lsminer.$FILE_DATE.cont.txt"
+COUNT_HELPER_FILE_STAGE="lsminer.$FILE_DATE.cont_stage.txt"
+
 
 _printLine(){
   if [ ! -z "$1" ]; then
@@ -52,26 +63,38 @@ show_help() {
                    [-begin 'DD-MON-YYYY HH:MI:SS' -end 'DD-MON-YYYY HH:MI:SS']
                    [-group_by <$SUPPORTED_ATTR>]
                    [-group_format <$SUPPORTED_TIMESTAMP_FORMAT>]
-                   [-csv 
-                      [-tag <tag_string>] ]
-     
+                   [-csv <result_file.csv>]
+                      [-csv_delimiter '<csv_character_delimiter>']
+                   [-salve_filter <name_new_logfile_filtered> ]
      
       Where: 
-       -log          -> Required. Must provide an valid LISTENER log file.
-       -filter       -> Multiple filters with any supported attribute ($SUPPORTED_ATTR)
+       -log           -> Provide an valid LISTENER log file (Required)
+       
+       -filter        -> Multiple filters with any supported attribute ($SUPPORTED_ATTR)
                           Example: user=zabbix,ip=192.168.1.80,service_name=svcprod.domain.com
-       -begin        -> The begin timestamp to filter Listener log file using interval date and time (requried with -end)
-       -end          -> The end timestamp  to filter Listener log file using interval date and time (requried with -begin)
-       -filter_file  -> Provide an helper file to apply filter in batch mode
-                          Example: -filter_file appserver_ip_list.txt
-       -filter_attr  -> Define the supported content type in -filter_file ($SUPPORTED_ATTR)
-                          Example: -filter_attr IP
-       -group_by     -> Specify the ATTR used as Group By for the connections count ($SUPPORTED_ATTR)
-       -group_format -> Specify the timestamp format used when -group_by is TIMESTAMP (default). 
-                          The default format is DD-MON-YYYY HH:MI (connections per min).
-       -csv          -> The result will be saved in CSV file instead print table in the screen.
-       -tag          -> Allow specify an custom TAG to be used in the CSV result file name.
-      
+
+       -begin         -> The begin timestamp to filter Listener log file using interval date and time (required with -end)
+       -end           -> The end timestamp  to filter Listener log file using interval date and time (required with -begin)
+                          Example: -begin '19-AUG-2023 11:00:00' -end '19-AUG-2023 12:00:00'
+
+       -filter_file   -> Provide an helper file to apply filter in batch mode
+       -filter_attr   -> Define the supported content type in -filter_file ($SUPPORTED_ATTR)
+                          Example: -filter_file appserver_ip_list.txt -filter_attr IP
+        
+       -save_filter   -> Create a new Log File with only lines filtered by this session.
+                         Optionally use this option to reuse the new log file many times with pre-applied commom filters for performance improvement.
+
+       -group_by      -> Specify the ATTR used as Group By for the connections count ($SUPPORTED_ATTR).
+                         Default is TIMESTAMP
+
+       -group_format  -> Specify the timestamp format used when -group_by is TIMESTAMP (default). 
+                           The default format is DD-MON-YYYY HH:MI (connections per min).
+       
+       -csv           -> The result will be saved in CSV file instead of print table in the screen.
+                         Optionally, provide a custom name for the CSV result file.
+                         
+       -csv_delimiter -> Allow specify an custom TAG to be used in the CSV result file name.
+       
       "
     exit 1
 }
@@ -86,7 +109,6 @@ while [[ $# -gt 0 ]]; do
     key="$1"
     case $key in
         -log)
-            log="$2"
             LogFileName="$2"
             shift
             shift
@@ -107,11 +129,15 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -csv)
-            resultFormat="csv"
-            shift
+           resultFormat="csv"
+           if [[ -n "$2" && "$2" != -* ]]; then
+             CSV_OUTPUT_FILE="$2"
+             shift
+            fi
+            shift 
             ;;
-        -tag)
-            tag="$2"
+        -csv_delimiter)
+            CSV_DELIMITER="$2"
             shift
             shift
             ;;
@@ -121,17 +147,22 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -group_format)
-            group_format="$2"
+            group_format="${2^^}"
             shift
             shift
             ;;
         -begin)
-            BEGIN_TIMESTAMP="$2"
+            BEGIN_TIMESTAMP="${2^^}"
             shift
             shift
             ;;
         -end)
-            END_TIMESTAMP="$2"
+            END_TIMESTAMP="${2^^}"
+            shift
+            shift
+            ;;
+        -save_filter)
+            SAVE_FILTER_FILE="$2"
             shift
             shift
             ;;
@@ -142,17 +173,16 @@ while [[ $# -gt 0 ]]; do
 done
 
 # check -log
-if [ -z "$log" ]; then
-    printMessage "ERROR" "The -log parameter is required." "="
-    show_help
+if [ -z "$LogFileName" ]; then
+  printMessage "ERROR" "The -log parameter is required." "="
+  show_help
+elif [ ! -f "$LogFileName"  ]; then
+  printMessage "ERROR" "The log file not exists." "="
+  show_help
 fi
 
 # check -filter_attr
-if [ "$filter_attr" == "IP" ]; then
- filter_attr="HOST"
-fi
-
-if [ ! -z "$filter_attr" ] && [[ ! "$filter_attr" =~ ^(HOST|SERVICE_NAME|PROGRAM|USER)$ ]]; then
+if [ ! -z "$filter_attr" ] && [[ ! "$filter_attr" =~ ^(IP|HOST|SERVICE_NAME|PROGRAM|USER)$ ]]; then
     printMessage "ERROR" "The value for -filter_attr is invalid" "="
     show_help
 fi
@@ -170,17 +200,13 @@ if [ ! -z "$filter_file" ] && [ ! -f "$filter_file" ]; then
 fi
 
 # check -tag
-if [ ! -z "$tag" ] && [[ ! "$tag" =~ ^[[:alnum:][:space:]]+$ ]]; then
+if [ ! -z "$tag" ] && [[ ! "$tag" =~ $SUPPORTED_FILE_CHARACTERS ]]; then
     printMessage "ERROR" "-tag cannot have special characters." "="
     show_help
 fi
 
-if [ "$group_by" == "IP" ]; then
- group_by="HOST"
-fi
-
 # check -group_by
-if [ ! -z "$group_by" ] && [[ ! "$group_by" =~ ^(HOST|TIMESTAMP|SERVICE_NAME|USER|PROGRAM)$ ]]; then
+if [ ! -z "$group_by" ] && [[ ! "$group_by" =~ ^(IP|HOST|TIMESTAMP|SERVICE_NAME|USER|PROGRAM)$ ]]; then
     printMessage "ERROR" "Invalid value to -group_by parameter." "="
     show_help
 fi
@@ -193,22 +219,35 @@ if [ ! -z "$group_format"  ]; then
  fi
 fi
 
+# check -save_filter
+if [ ! -z "$SAVE_FILTER_FILE" ] && [[ ! "$SAVE_FILTER_FILE" =~ $SUPPORTED_FILE_CHARACTERS ]]; then
+    printMessage "ERROR" "-save_filter cannot have special characters." "="
+    show_help
+elif [ -f "$SAVE_FILTER_FILE" ]; then
+    printMessage "ERROR" "The file name provided in -save_filter already exists." "="
+    show_help
+fi
+
+# check -csv
+if [ ! -z "$CSV_OUTPUT_FILE" ] && [[ ! "$CSV_OUTPUT_FILE" =~ $SUPPORTED_FILE_CHARACTERS ]]; then
+    printMessage "ERROR" "-csv file name cannot have special characters." "="
+    show_help
+elif [ -f "$CSV_OUTPUT_FILE" ]; then
+    printMessage "ERROR" "The file name provided in -csv already exists." "="
+    show_help
+fi
+
+# check -csv_delimiter
+if [ -z "$CSV_DELIMITER"  ]; then
+ CSV_DELIMITER=","
+fi
+
 #################################################################################################################
 
 
-
-
-dataArquivo=$(date +'%H%M%S')
-
-if [ -z "$tag" ]; then 
- tag="output"
+if [ "$resultFormat" = "csv" ] && [ -z "$CSV_OUTPUT_FILE" ]; then
+ CSV_OUTPUT_FILE="result_${tag}_${dtLog}.csv"
 fi
-OUTPUT_FILE="${tag}_${dtLog}.csv"
-
-CONNECTIONS_FILE="lsminer.$dataArquivo.conn.txt"
-FILE_LIST_ITEM="lsminer.$dataArquivo.list.txt"
-COUNT_HELPER_FILE="lsminer.$dataArquivo.cont.txt"
-COUNT_HELPER_FILE_STAGE="lsminer.$dataArquivo.cont_stage.txt"
 
 clearTempFiles()
 {
@@ -237,8 +276,8 @@ case "$group_by" in
         GROUPBY_INFO_SUMMARY="Log Timestamp"
         ;;
     "HOST")
-        GROUPBY_INFO_SUMMARY="IP Address"
-        AWK_1=3
+        GROUPBY_INFO_SUMMARY="Hostname"
+        AWK_1=2
         FILTER_PREFIX="HOST="
         ;;
     "SERVICE_NAME")
@@ -255,6 +294,11 @@ case "$group_by" in
         GROUPBY_INFO_SUMMARY="OS USER"
         AWK_1=2
         FILTER_PREFIX="USER="
+        ;;
+    "IP")
+        GROUPBY_INFO_SUMMARY="IP Address"
+        AWK_1=3
+        FILTER_PREFIX="HOST="
         ;;
     *)
         ;;
@@ -321,13 +365,16 @@ echo ""
 echo ""
 echo "------------------------------------------------------------------------------------"
 
-# generate the connections file with valid lines
+
+# create the connections file with valid lines
 printMessage "INFO" "Processing the log file $LogFileName ..."
 grep CONNECT_DATA $LogFileName | grep "establish" >> $CONNECTIONS_FILE
 
 ## filter file loop
 if [ ! -z "$filter_attr" ] && [ ! -z "$filter_file" ]; then
+ 
  printMessage "INFO" "Reading Filter File: $filter_file"
+
  while IFS= read -r filter_line; do
     printMessage "INFO" "Including lines where $filter_attr=$filter_line"
     grep "$filter_attr=$filter_line" "$CONNECTIONS_FILE" >> $CONNECTIONS_FILE.filter
@@ -368,14 +415,23 @@ if [ ! -z "$filter" ]; then
 
 fi
 
-# apply timestamp filter
-# this filter must be the latest because it is CPU bound
+# apply timestamp filter, this filter must be the latest because it is CPU bound
 if [ ! -z "$BEGIN_TIMESTAMP" ] && [ ! -z "$END_TIMESTAMP" ]; then
+ 
  printMessage "INFO" "Applying timestamp filter from '$BEGIN_TIMESTAMP' to '$END_TIMESTAMP'"
+ 
  lines=$(applyIntervalFilter "$BEGIN_TIMESTAMP" "$END_TIMESTAMP" $CONNECTIONS_FILE)
+ 
  if [ "$lines" -eq 0 ]; then
   exitHelper "ERROR" "No lines in the provided interval."
  fi
+
+fi
+
+# preserve an copy of the filtered file
+if [ ! -z "$SAVE_FILTER_FILE" ]; then
+ printMessage "INFO" "Creating filtered file as $SAVE_FILTER_FILE"
+ cp $CONNECTIONS_FILE $SAVE_FILTER_FILE
 fi
 
 GROUP_BY_WIDTH=20
@@ -400,7 +456,7 @@ fi
   
   # result can be csv or table format
   if [ "$resultFormat" == "csv" ]; then
-   echo "$line;$CONN_COUNT" >> $COUNT_HELPER_FILE_STAGE
+   echo "$line""$CSV_DELIMITER""$CONN_COUNT" >> $COUNT_HELPER_FILE_STAGE
   else
    printf "%-30s  %-30s\n" "$line" "$CONN_COUNT" >> $COUNT_HELPER_FILE_STAGE
   fi
@@ -409,7 +465,7 @@ fi
 
 
 if [ "$group_by" == "TIMESTAMP" ]; then
- # output orded by timestamp
+ # output ordered by timestamp
  sort  $COUNT_HELPER_FILE_STAGE >> $COUNT_HELPER_FILE
 else
  # output oreded by connections count
@@ -422,9 +478,9 @@ echo "--------------------------------------------------------------------------
 echo ""
 
  if [ "$resultFormat" == "csv" ]; then
-  echo "group_by;conn_count" > $OUTPUT_FILE
-  cat $COUNT_HELPER_FILE >> $OUTPUT_FILE
-  echo "[INFO] CSV result file: $OUTPUT_FILE"
+  echo "group_by${CSV_DELIMITER}conn_count" > $CSV_OUTPUT_FILE
+  cat $COUNT_HELPER_FILE >> $CSV_OUTPUT_FILE
+  echo "[INFO] CSV result file: $CSV_OUTPUT_FILE"
  else
   echo ""
   echo "Connections count by $GROUPBY_INFO_SUMMARY:"
