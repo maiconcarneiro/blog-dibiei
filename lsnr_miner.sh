@@ -1,23 +1,22 @@
 #!/bin/bash
-# lsnr_miner.sh - v1.6
+# lsnr_miner.sh - v1.7
 # Script to analyze Oracle Listener log file by applying advanced filters and provide connection count at different levels.
 #
 # Author: Maicon Carneiro (dibiei.blog)
 #
 # Date       | Author             | Change
-# ----------- -------------------- -----------------------------------------------------------
+# ----------- -------------------- ------------------------------------------------------------------------
 # 20/02/2024 | Maicon Carneiro    | v1 based on the script "lsnr_clients.sh"
 # 21/02/2024 | Maicon Carneiro    | Support to Timestamp filter
 # 22/02/2024 | Maicon Carneiro    | Support to save_filter and CSV improvements
+# 23/02/2024 | Maicon Carneiro    | Support for Filter using IP and dynamic column width in the result table 
 
 SUPPORTED_FILE_CHARACTERS='^[a-zA-Z0-9_.-]+$'
 SUPPORTED_ATTR="IP|HOST|PROGRAM|USER|SERVICE_NAME"
 SUPPORTED_TIMESTAMP_FORMAT="'DD-MON-YYYY' | 'DD-MON-YYYY HH' | 'DD-MON-YYYY HH:MI' | 'DD-MON-YYYY HH:MI:SS'"
-LogFileName=""
-resultFormat="Table"
-CSV_DELIMITER=","
-dtLog=$(date +'%Y%m%d_%H%M%S')
+FILE_DATE=$(date +'%H%M%S')
 
+LogFileName=""
 filter_attr=""
 filter_value=""
 filter_file=""
@@ -27,8 +26,9 @@ group_format="DD-MON-YYYY HH:MI"
 BEGIN_TIMESTAMP=""
 END_TIMESTAMP=""
 SAVE_FILTER_FILE=""
+resultFormat="Table"
+CSV_DELIMITER=","
 
-FILE_DATE=$(date +'%H%M%S')
 CONNECTIONS_FILE="lsminer.$FILE_DATE.conn.txt"
 FILE_LIST_ITEM="lsminer.$FILE_DATE.list.txt"
 COUNT_HELPER_FILE="lsminer.$FILE_DATE.cont.txt"
@@ -36,13 +36,18 @@ COUNT_HELPER_FILE_STAGE="lsminer.$FILE_DATE.cont_stage.txt"
 
 
 _printLine(){
-  if [ ! -z "$1" ]; then
-   for ((i=1; i<=100; i++)); do
+# used by printMessage and the result with table format.
+ if [ ! -z "$1" ]; then
+   MAX_LENGTH=$2
+   if [ -z "$MAX_LENGTH" ]; then
+     MAX_LENGTH=100
+   fi
+   for ((i=1; i<=$MAX_LENGTH; i++)); do
     LINE_HELPER+="$1"
    done;
    echo $LINE_HELPER
    unset LINE_HELPER
-  fi
+ fi
 }
 
 # Message log helper
@@ -63,8 +68,7 @@ show_help() {
                    [-begin 'DD-MON-YYYY HH:MI:SS' -end 'DD-MON-YYYY HH:MI:SS']
                    [-group_by <$SUPPORTED_ATTR>]
                    [-group_format <$SUPPORTED_TIMESTAMP_FORMAT>]
-                   [-csv <result_file.csv>]
-                      [-csv_delimiter '<csv_character_delimiter>']
+                   [-csv <result_file.csv>] [-csv_delimiter '<csv_char_delimiter>']
                    [-salve_filter <name_new_logfile_filtered> ]
      
       Where: 
@@ -73,9 +77,8 @@ show_help() {
        -filter        -> Multiple filters with any supported attribute ($SUPPORTED_ATTR)
                           Example: user=zabbix,ip=192.168.1.80,service_name=svcprod.domain.com
 
-       -begin         -> The begin timestamp to filter Listener log file using interval date and time (required with -end)
-       -end           -> The end timestamp  to filter Listener log file using interval date and time (required with -begin)
-                          Example: -begin '19-AUG-2023 11:00:00' -end '19-AUG-2023 12:00:00'
+       -begin         -> The BEGIN and END timestamp to filter Listener log file using date interval.
+       -end               Example: -begin '19-AUG-2023 11:00:00' -end '19-AUG-2023 12:00:00'
 
        -filter_file   -> Provide an helper file to apply filter in batch mode
        -filter_attr   -> Define the supported content type in -filter_file ($SUPPORTED_ATTR)
@@ -93,7 +96,7 @@ show_help() {
        -csv           -> The result will be saved in CSV file instead of print table in the screen.
                          Optionally, provide a custom name for the CSV result file.
                          
-       -csv_delimiter -> Allow specify an custom TAG to be used in the CSV result file name.
+       -csv_delimiter -> Allow specify an custom CSV delimiter (default is ',').
        
       "
     exit 1
@@ -246,7 +249,7 @@ fi
 
 
 if [ "$resultFormat" = "csv" ] && [ -z "$CSV_OUTPUT_FILE" ]; then
- CSV_OUTPUT_FILE="result_${tag}_${dtLog}.csv"
+ CSV_OUTPUT_FILE="result_${FILE_DATE}.csv"
 fi
 
 clearTempFiles()
@@ -374,10 +377,16 @@ grep CONNECT_DATA $LogFileName | grep "establish" >> $CONNECTIONS_FILE
 if [ ! -z "$filter_attr" ] && [ ! -z "$filter_file" ]; then
  
  printMessage "INFO" "Reading Filter File: $filter_file"
+ 
+ # print filter as 'IP='' but apply grep as 'HOST=''
+ _local_filter_attr=$filter_attr
+ if [ "$filter_attr" == "IP" ]; then
+  _local_filter_attr="HOST"
+ fi
 
  while IFS= read -r filter_line; do
     printMessage "INFO" "Including lines where $filter_attr=$filter_line"
-    grep "$filter_attr=$filter_line" "$CONNECTIONS_FILE" >> $CONNECTIONS_FILE.filter
+    grep "$_local_filter_attr=$filter_line" "$CONNECTIONS_FILE" >> $CONNECTIONS_FILE.filter
  done < "$filter_file"
  
  cat $CONNECTIONS_FILE.filter > $CONNECTIONS_FILE
@@ -454,11 +463,15 @@ fi
   textFilter=$line
   CONN_COUNT=$(grep -wc "$textFilter" $FILE_LIST_ITEM)
   
+  if [ ${#line} -gt "$GROUP_BY_WIDTH" ]; then
+   GROUP_BY_WIDTH=$(( ${#line} + 10 ))
+  fi
+
   # result can be csv or table format
   if [ "$resultFormat" == "csv" ]; then
    echo "$line""$CSV_DELIMITER""$CONN_COUNT" >> $COUNT_HELPER_FILE_STAGE
   else
-   printf "%-30s  %-30s\n" "$line" "$CONN_COUNT" >> $COUNT_HELPER_FILE_STAGE
+   echo "$line | $CONN_COUNT" >> $COUNT_HELPER_FILE_STAGE
   fi
 
  done < "$FILE_LIST_ITEM.uniq"
@@ -469,7 +482,7 @@ if [ "$group_by" == "TIMESTAMP" ]; then
  sort  $COUNT_HELPER_FILE_STAGE >> $COUNT_HELPER_FILE
 else
  # output oreded by connections count
- sort -r -k 2n $COUNT_HELPER_FILE_STAGE >> $COUNT_HELPER_FILE
+ sort -r -k 3n $COUNT_HELPER_FILE_STAGE >> $COUNT_HELPER_FILE
 fi
 
 
@@ -477,19 +490,21 @@ printMessage "INFO" "Completed"
 echo "------------------------------------------------------------------------------------"
 echo ""
 
+
  if [ "$resultFormat" == "csv" ]; then
   echo "group_by${CSV_DELIMITER}conn_count" > $CSV_OUTPUT_FILE
   cat $COUNT_HELPER_FILE >> $CSV_OUTPUT_FILE
   echo "[INFO] CSV result file: $CSV_OUTPUT_FILE"
  else
+  LINE_SIZE=$((GROUP_BY_WIDTH + 10))
   echo ""
   echo "Connections count by $GROUPBY_INFO_SUMMARY:"
-  echo "========================================"
-  echo "Item                           Count"
-  echo "===========================    ========="
-   cat $COUNT_HELPER_FILE
-  echo "---------------------------    ---------"
-  echo "========================================"
+  _printLine "=" $LINE_SIZE
+  echo "Item Count" | awk -v width="$GROUP_BY_WIDTH" '{ printf "%-" width "s%s\n", $1, $2 }'
+  _printLine "=" $LINE_SIZE
+   awk -F "|" -v width="$GROUP_BY_WIDTH" '{ printf "%-" width "s%s\n", $1, $2 }' $COUNT_HELPER_FILE
+  _printLine "=" $LINE_SIZE
+  echo ""
  fi
 
 echo ""
