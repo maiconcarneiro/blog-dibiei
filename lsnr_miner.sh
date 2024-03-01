@@ -1,5 +1,5 @@
 #!/bin/bash
-# lsnr_miner.sh - v1.7
+# lsnr_miner.sh - v1.12
 # Script to analyze Oracle Listener log file by applying advanced filters and provide connection count at different levels.
 #
 # Author: Maicon Carneiro (dibiei.blog)
@@ -10,17 +10,25 @@
 # 21/02/2024 | Maicon Carneiro    | Support to Timestamp filter
 # 22/02/2024 | Maicon Carneiro    | Support to save_filter and CSV improvements
 # 23/02/2024 | Maicon Carneiro    | Support for Filter using IP and dynamic column width in the result table 
+# 29/02/2024 | Maicon Carneiro    | Support multiple log files passing an directory in -log parameter
 
-SUPPORTED_FILE_CHARACTERS='^[a-zA-Z0-9_.-]+$'
-SUPPORTED_ATTR="IP|HOST|PROGRAM|USER|SERVICE_NAME"
-SUPPORTED_TIMESTAMP_FORMAT="'DD-MON-YYYY' | 'DD-MON-YYYY HH' | 'DD-MON-YYYY HH:MI' | 'DD-MON-YYYY HH:MI:SS'"
 FILE_DATE=$(date +'%H%M%S')
+CURRENT_DIR=$(pwd)
+HELPER_FILE_PREFIX="${CURRENT_DIR}/lsminer.$FILE_DATE"
 
+CONNECTIONS_FILE="${HELPER_FILE_PREFIX}.conn.txt"
+FILE_LIST_ITEM="${HELPER_FILE_PREFIX}.list.txt"
+COUNT_HELPER_FILE="${HELPER_FILE_PREFIX}.cont.txt"
+COUNT_HELPER_FILE_STAGE="${HELPER_FILE_PREFIX}.cont_stage.txt"
+SOURCE_HOSTNAME_FILE="${HELPER_FILE_PREFIX}.sourcehost.txt"
+LISTENER_LOG_FILES="${HELPER_FILE_PREFIX}.listener_log_files.txt"
+
+LOG_PATH=""
+LOG_TYPE=""
 LogFileName=""
 filter_attr=""
 filter_value=""
 filter_file=""
-tag="output"
 group_by="TIMESTAMP"
 group_format="DD-MON-YYYY HH:MI"
 BEGIN_TIMESTAMP=""
@@ -28,15 +36,15 @@ END_TIMESTAMP=""
 SAVE_FILTER_FILE=""
 resultFormat="Table"
 CSV_DELIMITER=","
+FILTER_ONLY=""
 
-CONNECTIONS_FILE="lsminer.$FILE_DATE.conn.txt"
-FILE_LIST_ITEM="lsminer.$FILE_DATE.list.txt"
-COUNT_HELPER_FILE="lsminer.$FILE_DATE.cont.txt"
-COUNT_HELPER_FILE_STAGE="lsminer.$FILE_DATE.cont_stage.txt"
+SUPPORTED_FILE_CHARACTERS='^[a-zA-Z0-9_.-]+$'
+SUPPORTED_ATTR="IP|HOST|PROGRAM|USER|SERVICE_NAME"
+SUPPORTED_TIMESTAMP_FORMAT="'DD-MON-YYYY' | 'DD-MON-YYYY HH' | 'DD-MON-YYYY HH:MI' | 'DD-MON-YYYY HH:MI:SS'"
 
 
-_printLine(){
 # used by printMessage and the result with table format.
+_printLine(){
  if [ ! -z "$1" ]; then
    MAX_LENGTH=$2
    if [ -z "$MAX_LENGTH" ]; then
@@ -52,7 +60,7 @@ _printLine(){
 
 # Message log helper
 printMessage(){
- MSG_TYPE=$1
+ MSG_TYPE=$(printf "%-7s" "$1")
  MSG_TEXT=$2
  MSG_DATE=$(date +'%d/%m/%Y %H:%M:%S')
  _printLine $3
@@ -62,7 +70,7 @@ printMessage(){
 
 show_help() {
     echo "
-      Usage: $0 -log <listener_log_file_name>
+      Usage: $0 -log <listener_log_path>
                    [-filter <ATTR=VALUE> | ATTR1=VALUE1,ATTR2=VALUE2,ATTRn=VALUEn]
                    [-filter_file <filer_file_name> -file_attr <$SUPPORTED_ATTR>]
                    [-begin 'DD-MON-YYYY HH:MI:SS' -end 'DD-MON-YYYY HH:MI:SS']
@@ -70,9 +78,10 @@ show_help() {
                    [-group_format <$SUPPORTED_TIMESTAMP_FORMAT>]
                    [-csv <result_file.csv>] [-csv_delimiter '<csv_char_delimiter>']
                    [-salve_filter <name_new_logfile_filtered> ]
+                   [-filter_only <name_new_logfile_filtered> ]
      
       Where: 
-       -log           -> Provide an valid LISTENER log file (Required)
+       -log           -> Provide an valid LISTENER log file or Path with multiple log files (Required)
        
        -filter        -> Multiple filters with any supported attribute ($SUPPORTED_ATTR)
                           Example: user=zabbix,ip=192.168.1.80,service_name=svcprod.domain.com
@@ -85,6 +94,7 @@ show_help() {
                           Example: -filter_file appserver_ip_list.txt -filter_attr IP
         
        -save_filter   -> Create a new Log File with only lines filtered by this session.
+       -filter_only   -> similar to -save_filter, but no count connections will be perfomed.
                          Optionally use this option to reuse the new log file many times with pre-applied commom filters for performance improvement.
 
        -group_by      -> Specify the ATTR used as Group By for the connections count ($SUPPORTED_ATTR).
@@ -102,7 +112,7 @@ show_help() {
     exit 1
 }
 
-################################################## Params ######################################################
+################################################## Params Begin ######################################################
 
 if [ $# -lt 2 ]; then
     show_help
@@ -112,7 +122,7 @@ while [[ $# -gt 0 ]]; do
     key="$1"
     case $key in
         -log)
-            LogFileName="$2"
+            LOG_PATH="$2"
             shift
             shift
             ;;
@@ -165,9 +175,21 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -save_filter)
-            SAVE_FILTER_FILE="$2"
-            shift
-            shift
+            SAVE_FILTER_FILE="save_filter_$FILE_DATE.log"
+            if [[ -n "$2" && "$2" != -* ]]; then
+             SAVE_FILTER_FILE="$2"
+             shift
+            fi
+            shift 
+            ;;
+        -filter_only)
+            FILTER_ONLY="YES"
+            SAVE_FILTER_FILE="save_filter_$FILE_DATE.log"
+            if [[ -n "$2" && "$2" != -* ]]; then
+             SAVE_FILTER_FILE="$2"
+             shift
+            fi
+            shift 
             ;;
         *)
             show_help
@@ -176,13 +198,20 @@ while [[ $# -gt 0 ]]; do
 done
 
 # check -log
-if [ -z "$LogFileName" ]; then
+if [ -z "$LOG_PATH" ]; then
   printMessage "ERROR" "The -log parameter is required." "="
   show_help
-elif [ ! -f "$LogFileName"  ]; then
-  printMessage "ERROR" "The log file not exists." "="
-  show_help
 fi
+
+if [ -f "$LOG_PATH" ]; then
+ LOG_TYPE="FILE"
+elif [ -d "$LOG_PATH" ]; then
+ LOG_TYPE="DIR"
+else
+ printMessage "ERROR" "The log file path not exists." "="
+ show_help
+fi
+
 
 # check -filter_attr
 if [ ! -z "$filter_attr" ] && [[ ! "$filter_attr" =~ ^(IP|HOST|SERVICE_NAME|PROGRAM|USER)$ ]]; then
@@ -199,12 +228,6 @@ fi
 # check -filter_file
 if [ ! -z "$filter_file" ] && [ ! -f "$filter_file" ]; then
     printMessage "ERROR" "The file $filter_file provided in -filter_file don't exist." "=" 
-    show_help
-fi
-
-# check -tag
-if [ ! -z "$tag" ] && [[ ! "$tag" =~ $SUPPORTED_FILE_CHARACTERS ]]; then
-    printMessage "ERROR" "-tag cannot have special characters." "="
     show_help
 fi
 
@@ -245,12 +268,11 @@ if [ -z "$CSV_DELIMITER"  ]; then
  CSV_DELIMITER=","
 fi
 
-#################################################################################################################
-
-
 if [ "$resultFormat" = "csv" ] && [ -z "$CSV_OUTPUT_FILE" ]; then
  CSV_OUTPUT_FILE="result_${FILE_DATE}.csv"
 fi
+
+################################################ Params End #################################################
 
 clearTempFiles()
 {
@@ -258,7 +280,9 @@ clearTempFiles()
    rm -f $FILE_LIST_ITEM
    rm -f $COUNT_HELPER_FILE
    rm -f $COUNT_HELPER_FILE_STAGE
-   rm -rf $FILE_LIST_ITEM.uniq
+   rm -f $FILE_LIST_ITEM.uniq
+   rm -f $SOURCE_HOSTNAME_FILE
+   rm -f $LISTENER_LOG_FILES
 }
 
 exitHelper(){
@@ -268,7 +292,6 @@ exitHelper(){
   echo ""
   exit 1
 }
-
 
 AWK_1=1
 FILTER_PREFIX=""
@@ -307,19 +330,18 @@ case "$group_by" in
         ;;
 esac
 
+
+# used to apply timestamp filter after consolidate the logfile
 applyIntervalFilter(){
 start_date="$1"
 end_date="$2"
 
-# convert the date to UNIX timestamp format
 _start_timestamp=$(date -d "$start_date" "+%Y%m%d%H%M%S")
 _end_timestamp=$(date -d "$end_date" "+%Y%m%d%H%M%S")
 
-# input is an listener log file and output is an new file created with lines filtered by timestamp
 input_file=$3
 output_file=$input_file.timestamp.filter
 
-# return lines that is between start and end timestamp
 awk -v start="$_start_timestamp" -v end="$_end_timestamp" -F "*"  '{
     # get the first filed in the log file with DD-MON-YYYY HH:MI:SS format
     date_str=$1
@@ -343,35 +365,155 @@ awk -v start="$_start_timestamp" -v end="$_end_timestamp" -F "*"  '{
     }
   }' "$input_file" > $output_file
 
-# replace the input  with the output file
 cat $output_file > $input_file
 rm -f $output_file
 
-# return the number of lines after the filter
 LINES_COUNT=$(cat $input_file | wc -l)
 echo "$LINES_COUNT"
 }
 
+
+
+listDirLogFiles(){
+
+  cd $LOG_PATH
+  touch $LISTENER_LOG_FILES
+  for FILE in $(grep -s -l -m 1 "CONNECT_DATA" *.log); do
+   BEGIN_LOG=$(grep -m 1 "CONNECT_DATA" $FILE | awk -F "*" '{print $1}' | cut -c 1-20 )
+   END_LOG=$(tail -1 $FILE | awk -F "*" '{print $1}' | cut -c 1-20 )
+   echo "$FILE*$BEGIN_LOG*$END_LOG*" >> $LISTENER_LOG_FILES
+  done
+  
+  # define interval from '1970-01-01' to current date if timestamp filter was not used.
+  if [ -z "$BEGIN_TIMESTAMP" ]; then
+  _start_timestamp=$(date -d "1970-01-01" +'%Y%m%d%H%M%S')
+  _end_timestamp=$(date +'%Y%m%d%H%M%S')
+  else
+  _start_timestamp=$(date -d "$BEGIN_TIMESTAMP" "+%Y%m%d%H%M%S")
+  _end_timestamp=$(date -d "$END_TIMESTAMP" "+%Y%m%d%H%M%S")
+  fi
+  
+  awk -v start="$_start_timestamp" -v end="$_end_timestamp" -F "*"  '{
+      # get the first filed in the log file with DD-MON-YYYY HH:MI:SS format
+      date_str1=$2
+      date_str2=$3
+
+      # map month name 'MON' to month number 'MM'
+      months["JAN"] = "01"; months["FEB"] = "02"; months["MAR"] = "03"; months["APR"] = "04";
+      months["MAY"] = "05"; months["JUN"] = "06"; months["JUL"] = "07"; months["AUG"] = "08";
+      months["SEP"] = "09"; months["OCT"] = "10"; months["NOV"] = "11"; months["DEC"] = "12";
+      
+      # begin log timestamp
+      split(date_str1, date_parts1, /[-: ]/);
+      year1 = date_parts1[3];
+      month1 = months[date_parts1[2]];
+      day1 = date_parts1[1];
+      hour1 = date_parts1[4];
+      minute1 = date_parts1[5];
+      second1 = date_parts1[6];
+      log_begin=year1""month1""day1""hour1""minute1""second1
+      
+      # end log timestamp
+      split(date_str2, date_parts2, /[-: ]/);
+      year2 = date_parts2[3];
+      month2 = months[date_parts2[2]];
+      day2 = date_parts2[1];
+      hour2 = date_parts2[4];
+      minute2 = date_parts2[5];
+      second2 = date_parts2[6];
+      log_end=year2""month2""day2""hour2""minute2""second2
+
+      if ( (start >= log_begin && start <= log_end) || 
+           (end >= log_begin && end <= log_end)     || 
+           (log_begin >= start && log_begin <= end) || 
+           (log_end >= start && log_end <= end) ) {
+       print log_begin";"$1
+      }
+    }' "$LISTENER_LOG_FILES" | sort -t';' -n -k1 > $LISTENER_LOG_FILES.tmp
+  
+  rm -f $LISTENER_LOG_FILES
+  touch $LISTENER_LOG_FILES
+  for FILE in $(cat $LISTENER_LOG_FILES.tmp | awk -F ";" '{print $2}'); do
+   CHECK_LOG=$(grep -c $FILE $LISTENER_LOG_FILES)
+   if [ "$CHECK_LOG" -eq 0 ]; then
+    echo "$FILE" >> $LISTENER_LOG_FILES
+   fi
+  done
+
+  rm -f $LISTENER_LOG_FILES.tmp
+  COUNT=$(cat $LISTENER_LOG_FILES | wc -l)
+  echo "$COUNT"
+}
+
+
+# get the source hostnames
+listSourceHosts(){
+FILE_NAME="$1"
+grep "status" $FILE_NAME | awk -F "HOST=" '{print $2}' | awk -F ")" '{print $1}' | awk -F "." '{print $1}' | sort -u > $SOURCE_HOSTNAME_FILE
+}
+
+printSourceHosts(){
+LIST_HOST_NAMES=""
+for NAME in $(cat $SOURCE_HOSTNAME_FILE | sort -u); do
+ if [ -z "$LIST_HOST_NAMES" ]; then
+  LIST_HOST_NAMES="$NAME"
+ else
+  LIST_HOST_NAMES="$LIST_HOST_NAMES,$NAME"
+ fi
+done
+printMessage "INFO" "DB Server: $LIST_HOST_NAMES"
+}
+
+prepareLogFile(){
+ LogFileName="$1"
+  printMessage "INFO" "Processing the log file $LogFileName"
+  listSourceHosts $LogFileName
+  grep CONNECT_DATA $LogFileName | grep "establish" >> $CONNECTIONS_FILE
+}
+
+
+#######################################################################
+######################### BEGIN EXECUTION #############################
+#######################################################################
+
 echo ""
-echo "===================================== Summary ====================================="
-echo "Log File Name........: $LogFileName"
+echo "============================================= Summary =================================================="
+echo "Log Path.............: $LOG_PATH"
+echo "Log Type.............: $LOG_TYPE"
 echo "Filter...............: $filter"
 echo "Filter file..........: $filter_file"
 echo "Filter attr..........: $filter_attr"
+echo "Save Filter..........:"
 echo "Log Timestamp Begin..: $BEGIN_TIMESTAMP"
 echo "Log Timestamp End....: $END_TIMESTAMP"
 echo "Group By Column......: $group_by"
 echo "Result Type..........: $resultFormat"
-echo "==================================================================================="
+echo "=========================================================================================================="
 echo ""
 
 echo ""
-echo "------------------------------------------------------------------------------------"
-
+echo "----------------------------------------------------------------------------------------------------------"
 
 # create the connections file with valid lines
-printMessage "INFO" "Processing the log file $LogFileName ..."
-grep CONNECT_DATA $LogFileName | grep "establish" >> $CONNECTIONS_FILE
+if [ "$LOG_TYPE" == "FILE" ]; then
+ prepareLogFile $LOG_PATH
+else 
+ 
+ cd $LOG_PATH
+ LINES_COUNT=$(listDirLogFiles)
+ if [ "$LINES_COUNT" -gt 0 ]; then
+  for FILE in $(cat $LISTENER_LOG_FILES); do
+   prepareLogFile $FILE
+  done
+  printSourceHosts
+ else
+  exitHelper "WARNING" "Log files not found." 
+ fi
+
+ cd $CURRENT_DIR
+fi
+
+printMessage "INFO" "Checking filters"
 
 ## filter file loop
 if [ ! -z "$filter_attr" ] && [ ! -z "$filter_file" ]; then
@@ -424,6 +566,8 @@ if [ ! -z "$filter" ]; then
 
 fi
 
+printMessage "INFO" "Checking filters"
+
 # apply timestamp filter, this filter must be the latest because it is CPU bound
 if [ ! -z "$BEGIN_TIMESTAMP" ] && [ ! -z "$END_TIMESTAMP" ]; then
  
@@ -443,6 +587,11 @@ if [ ! -z "$SAVE_FILTER_FILE" ]; then
  cp $CONNECTIONS_FILE $SAVE_FILTER_FILE
 fi
 
+if [ "$FILTER_ONLY" == "YES" ]; then
+  exitHelper "INFO" "Completed"
+fi
+
+
 GROUP_BY_WIDTH=20
 if [ "$group_by" == "TIMESTAMP" ]; then
  GROUP_BY_WIDTH=${#group_format}
@@ -458,6 +607,7 @@ else
  rm -f $FILE_LIST_ITEM.helper
 fi
 
+ printMessage "INFO" "Counting connections..."
  cat $FILE_LIST_ITEM | uniq > $FILE_LIST_ITEM.uniq
  while IFS= read -r line; do
   textFilter=$line
@@ -487,7 +637,7 @@ fi
 
 
 printMessage "INFO" "Completed"
-echo "------------------------------------------------------------------------------------"
+echo "----------------------------------------------------------------------------------------------------------"
 echo ""
 
 
