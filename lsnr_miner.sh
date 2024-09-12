@@ -1,5 +1,5 @@
 #!/bin/bash
-# lsnr_miner.sh - v1.12
+# lsnr_miner.sh - v1.13
 # Script to analyze Oracle Listener log file by applying advanced filters and provide connection count at different levels.
 #
 # Author: Maicon Carneiro (dibiei.blog)
@@ -11,6 +11,7 @@
 # 22/02/2024 | Maicon Carneiro    | Support to save_filter and CSV improvements
 # 23/02/2024 | Maicon Carneiro    | Support for Filter using IP and dynamic column width in the result table 
 # 29/02/2024 | Maicon Carneiro    | Support multiple log files passing an directory in -log parameter
+# 12/09/2024 | Maicon Carneiro    | Support for values with "\" bar during counting 
 
 FILE_DATE=$(date +'%H%M%S')
 CURRENT_DIR=$(pwd)
@@ -376,7 +377,6 @@ echo "$LINES_COUNT"
 
 listDirLogFiles(){
 
-  cd $LOG_PATH
   touch $LISTENER_LOG_FILES
   for FILE in $(grep -s -l -m 1 "CONNECT_DATA" *.log); do
    BEGIN_LOG=$(grep -m 1 "CONNECT_DATA" $FILE | awk -F "*" '{print $1}' | cut -c 1-20 )
@@ -528,7 +528,7 @@ if [ ! -z "$filter_attr" ] && [ ! -z "$filter_file" ]; then
 
  while IFS= read -r filter_line; do
     printMessage "INFO" "Including lines where $filter_attr=$filter_line"
-    grep "$_local_filter_attr=$filter_line" "$CONNECTIONS_FILE" >> $CONNECTIONS_FILE.filter
+    grep "'$_local_filter_attr=$filter_line'" "$CONNECTIONS_FILE" >> $CONNECTIONS_FILE.filter
  done < "$filter_file"
  
  cat $CONNECTIONS_FILE.filter > $CONNECTIONS_FILE
@@ -554,7 +554,7 @@ if [ ! -z "$filter" ]; then
    attr="HOST"
   fi
 
-  grep "$attr=$value" $CONNECTIONS_FILE > $CONNECTIONS_FILE.filter
+  grep "'$attr=$value'" $CONNECTIONS_FILE > $CONNECTIONS_FILE.filter
   cat $CONNECTIONS_FILE.filter > $CONNECTIONS_FILE
   rm -f $CONNECTIONS_FILE.filter
  done
@@ -565,8 +565,6 @@ if [ ! -z "$filter" ]; then
  fi
 
 fi
-
-printMessage "INFO" "Checking filters"
 
 # apply timestamp filter, this filter must be the latest because it is CPU bound
 if [ ! -z "$BEGIN_TIMESTAMP" ] && [ ! -z "$END_TIMESTAMP" ]; then
@@ -592,6 +590,8 @@ if [ "$FILTER_ONLY" == "YES" ]; then
 fi
 
 
+printMessage "INFO" "Preparing to count..."
+
 GROUP_BY_WIDTH=20
 if [ "$group_by" == "TIMESTAMP" ]; then
  GROUP_BY_WIDTH=${#group_format}
@@ -611,8 +611,10 @@ fi
  cat $FILE_LIST_ITEM | uniq > $FILE_LIST_ITEM.uniq
  while IFS= read -r line; do
   textFilter=$line
-  CONN_COUNT=$(grep -wc "$textFilter" $FILE_LIST_ITEM)
-  
+  textFilterEscaped=$(echo "$textFilter" | sed 's/\\/\\\\/g')
+  CONN_COUNT=$(grep -wc "$textFilterEscaped" $FILE_LIST_ITEM)
+
+
   if [ ${#line} -gt "$GROUP_BY_WIDTH" ]; then
    GROUP_BY_WIDTH=$(( ${#line} + 10 ))
   fi
@@ -632,7 +634,7 @@ if [ "$group_by" == "TIMESTAMP" ]; then
  sort  $COUNT_HELPER_FILE_STAGE >> $COUNT_HELPER_FILE
 else
  # output oreded by connections count
- sort -r -k 3n $COUNT_HELPER_FILE_STAGE >> $COUNT_HELPER_FILE
+ sort -t '|' -r -k 2n $COUNT_HELPER_FILE_STAGE >> $COUNT_HELPER_FILE
 fi
 
 
