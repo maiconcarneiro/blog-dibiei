@@ -1,5 +1,5 @@
 #!/bin/bash
-# lsnr_miner.sh - v1.13
+# lsnr_miner.sh - v1.14
 # Script to analyze Oracle Listener log file by applying advanced filters and provide connection count at different levels.
 #
 # https://raw.githubusercontent.com/maiconcarneiro/blog-dibiei/main/lsnr_miner.sh
@@ -14,6 +14,7 @@
 # 23/02/2024 | Maicon Carneiro    | Support for Filter using IP and dynamic column width in the result table 
 # 29/02/2024 | Maicon Carneiro    | Support multiple log files passing an directory in -log parameter
 # 12/09/2024 | Maicon Carneiro    | Support for values with "\" bar during counting 
+# 12/09/2024 | Maicon Carneiro    | Support for MacOS (Darwin) with bash 3.0
 
 FILE_DATE=$(date +'%H%M%S')
 CURRENT_DIR=$(pwd)
@@ -135,7 +136,8 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -filter_attr)
-            filter_attr="${2^^}"
+            #filter_attr="${2^^}"
+            filter_attr=$(echo "$2" | tr '[:lower:]' '[:upper:]')
             shift
             shift
             ;;
@@ -158,22 +160,22 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -group_by)
-            group_by="${2^^}"
+            group_by=$(echo "$2" | tr '[:lower:]' '[:upper:]')
             shift
             shift
             ;;
         -group_format)
-            group_format="${2^^}"
+            group_format=$(echo "$2" | tr '[:lower:]' '[:upper:]')
             shift
             shift
             ;;
         -begin)
-            BEGIN_TIMESTAMP="${2^^}"
+            BEGIN_TIMESTAMP=$(echo "$2" | tr '[:lower:]' '[:upper:]')
             shift
             shift
             ;;
         -end)
-            END_TIMESTAMP="${2^^}"
+            END_TIMESTAMP=$(echo "$2" | tr '[:lower:]' '[:upper:]')
             shift
             shift
             ;;
@@ -275,6 +277,35 @@ if [ "$resultFormat" = "csv" ] && [ -z "$CSV_OUTPUT_FILE" ]; then
  CSV_OUTPUT_FILE="result_${FILE_DATE}.csv"
 fi
 
+
+# define interval from '1970-01-01' to current date if timestamp filter was not used.
+OS_TYPE=$(uname)
+if [[ "$OS_TYPE" == "Linux" ]]; then
+
+  if [ -z "$BEGIN_TIMESTAMP" ]; then
+    _start_timestamp=$(date -d "1970-01-01" +'%Y%m%d%H%M%S')
+    _end_timestamp=$(date +'%Y%m%d%H%M%S')
+  else
+    _start_timestamp=$(date -d "$BEGIN_TIMESTAMP" "+%Y%m%d%H%M%S")
+    _end_timestamp=$(date -d "$END_TIMESTAMP" "+%Y%m%d%H%M%S")
+  fi
+
+
+elif [[ "$OS_TYPE" == "Darwin" ]]; then
+
+  if [ -z "$BEGIN_TIMESTAMP" ]; then
+    _start_timestamp=$(date -j -f "%d-%b-%Y %H:%M:%S" "1970-01-01 00:00:00" "+%Y%m%d%H%M%S")
+    _end_timestamp=$(date +'%Y%m%d%H%M%S')
+  else
+    _start_timestamp=$(date -j -f "%d-%b-%Y %H:%M:%S" "$BEGIN_TIMESTAMP" "+%Y%m%d%H%M%S")
+    _end_timestamp=$(date -j -f "%d-%b-%Y %H:%M:%S" "$END_TIMESTAMP" "+%Y%m%d%H%M%S")
+  fi
+
+else
+    echo "OS not supported: $os_name"
+fi
+
+
 ################################################ Params End #################################################
 
 clearTempFiles()
@@ -294,6 +325,12 @@ exitHelper(){
   echo ""
   echo ""
   exit 1
+}
+
+getEscaped(){
+ _textValue=$1
+ _escapedTextValue=$(echo "$_textValue" | sed 's/\\/\\\\/g')
+ echo "$_escapedTextValue"
 }
 
 AWK_1=1
@@ -336,11 +373,6 @@ esac
 
 # used to apply timestamp filter after consolidate the logfile
 applyIntervalFilter(){
-start_date="$1"
-end_date="$2"
-
-_start_timestamp=$(date -d "$start_date" "+%Y%m%d%H%M%S")
-_end_timestamp=$(date -d "$end_date" "+%Y%m%d%H%M%S")
 
 input_file=$3
 output_file=$input_file.timestamp.filter
@@ -385,15 +417,6 @@ listDirLogFiles(){
    END_LOG=$(tail -1 $FILE | awk -F "*" '{print $1}' | cut -c 1-20 )
    echo "$FILE*$BEGIN_LOG*$END_LOG*" >> $LISTENER_LOG_FILES
   done
-  
-  # define interval from '1970-01-01' to current date if timestamp filter was not used.
-  if [ -z "$BEGIN_TIMESTAMP" ]; then
-  _start_timestamp=$(date -d "1970-01-01" +'%Y%m%d%H%M%S')
-  _end_timestamp=$(date +'%Y%m%d%H%M%S')
-  else
-  _start_timestamp=$(date -d "$BEGIN_TIMESTAMP" "+%Y%m%d%H%M%S")
-  _end_timestamp=$(date -d "$END_TIMESTAMP" "+%Y%m%d%H%M%S")
-  fi
   
   awk -v start="$_start_timestamp" -v end="$_end_timestamp" -F "*"  '{
       # get the first filed in the log file with DD-MON-YYYY HH:MI:SS format
@@ -547,7 +570,8 @@ fi
 if [ ! -z "$filter" ]; then
  IFS=','
  for filter_helper in $filter; do
-  attr=$(echo ${filter_helper^^} | awk -F "=" '{print $1}')
+  filter_helperUpper=$(echo "$filter_helper" | tr '[:lower:]' '[:upper:]')
+  attr=$(echo $filter_helperUpper | awk -F "=" '{print $1}')
   value=$(echo $filter_helper | awk -F "=" '{print $2}')
   
   printMessage "INFO" "Applying filter: $attr=$value"
@@ -555,8 +579,10 @@ if [ ! -z "$filter" ]; then
   if [ "$attr" == "IP" ]; then
    attr="HOST"
   fi
-
-  grep "'$attr=$value'" $CONNECTIONS_FILE > $CONNECTIONS_FILE.filter
+  
+  #escapedFilter=$(echo "$attr=$value" | sed 's/\\/\\\\/g')
+  escapedFilter=$(getEscaped "$attr=$value")
+  grep "$escapedFilter" $CONNECTIONS_FILE > $CONNECTIONS_FILE.filter
   cat $CONNECTIONS_FILE.filter > $CONNECTIONS_FILE
   rm -f $CONNECTIONS_FILE.filter
  done
@@ -613,7 +639,8 @@ fi
  cat $FILE_LIST_ITEM | uniq > $FILE_LIST_ITEM.uniq
  while IFS= read -r line; do
   textFilter=$line
-  textFilterEscaped=$(echo "$textFilter" | sed 's/\\/\\\\/g')
+  #textFilterEscaped=$(echo "$textFilter" | sed 's/\\/\\\\/g')
+  textFilterEscaped=$(getEscaped "$textFilter")
   CONN_COUNT=$(grep -wc "$textFilterEscaped" $FILE_LIST_ITEM)
 
 
