@@ -1,5 +1,5 @@
 #!/bin/bash
-# lsnr_miner.sh - v1.20
+# lsnr_miner.sh - v1.21
 # Script to analyze Oracle Listener log file by applying advanced filters and provide connection count at different levels.
 #
 # https://raw.githubusercontent.com/maiconcarneiro/blog-dibiei/main/lsnr_miner.sh
@@ -16,7 +16,7 @@
 # 12/09/2024 | Maicon Carneiro    | Support for values with "\" bar during counting 
 # 12/09/2024 | Maicon Carneiro    | Support for MacOS (Darwin) with bash 3.0
 
-VERSION="v1.20"
+VERSION="v1.21"
 OS_TYPE=$(uname)
 FILE_DATE=$(date +'%H%M%S')
 CURRENT_DIR=$(pwd)
@@ -661,11 +661,10 @@ fi
  printMessage "INFO" "Counting connections..."
  cat $FILE_LIST_ITEM | uniq > $FILE_LIST_ITEM.uniq
  while IFS= read -r line; do
+
   textFilter=$line
-  #textFilterEscaped=$(echo "$textFilter" | sed 's/\\/\\\\/g')
   textFilterEscaped=$(getEscaped "$textFilter")
   CONN_COUNT=$(grep -wc "$textFilterEscaped" $FILE_LIST_ITEM)
-
 
   if [ ${#line} -gt "$GROUP_BY_WIDTH" ]; then
    GROUP_BY_WIDTH=$(( ${#line} + 10 ))
