@@ -1,5 +1,5 @@
 #!/bin/bash
-# lsnr_miner.sh - v1.14
+# lsnr_miner.sh - v1.18
 # Script to analyze Oracle Listener log file by applying advanced filters and provide connection count at different levels.
 #
 # https://raw.githubusercontent.com/maiconcarneiro/blog-dibiei/main/lsnr_miner.sh
@@ -16,6 +16,8 @@
 # 12/09/2024 | Maicon Carneiro    | Support for values with "\" bar during counting 
 # 12/09/2024 | Maicon Carneiro    | Support for MacOS (Darwin) with bash 3.0
 
+VERSION="v1.18"
+OS_TYPE=$(uname)
 FILE_DATE=$(date +'%H%M%S')
 CURRENT_DIR=$(pwd)
 HELPER_FILE_PREFIX="${CURRENT_DIR}/lsminer.$FILE_DATE"
@@ -33,8 +35,8 @@ LogFileName=""
 filter_attr=""
 filter_value=""
 filter_file=""
-group_by="TIMESTAMP"
-group_format="DD-MON-YYYY HH:MI"
+group_by="IP"
+group_format="DD-MON-YYYY"
 BEGIN_TIMESTAMP=""
 END_TIMESTAMP=""
 SAVE_FILTER_FILE=""
@@ -42,7 +44,7 @@ resultFormat="Table"
 CSV_DELIMITER=","
 FILTER_ONLY=""
 
-SUPPORTED_FILE_CHARACTERS='^[a-zA-Z0-9_.-]+$'
+SUPPORTED_FILE_CHARACTERS='^[a-zA-Z0-9_.-/]+$'
 SUPPORTED_ATTR="IP|HOST|PROGRAM|USER|SERVICE_NAME"
 SUPPORTED_TIMESTAMP_FORMAT="'DD-MON-YYYY' | 'DD-MON-YYYY HH' | 'DD-MON-YYYY HH:MI' | 'DD-MON-YYYY HH:MI:SS'"
 
@@ -89,7 +91,7 @@ show_help() {
        
        -filter        -> Multiple filters with any supported attribute ($SUPPORTED_ATTR)
                           Example: user=zabbix,ip=192.168.1.80,service_name=svcprod.domain.com
-
+    
        -begin         -> The BEGIN and END timestamp to filter Listener log file using date interval.
        -end               Example: -begin '19-AUG-2023 11:00:00' -end '19-AUG-2023 12:00:00'
 
@@ -118,6 +120,10 @@ show_help() {
 
 ################################################## Params Begin ######################################################
 
+if [[ ! "$OS_TYPE" =~ ^(Linux|Darwin)$ ]]; then
+  printMessage "WARNING" "The OS $OS_TYPE is not supported and can cause unexpected behavior." "."
+fi
+
 if [ $# -lt 2 ]; then
     show_help
 fi
@@ -136,7 +142,6 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -filter_attr)
-            #filter_attr="${2^^}"
             filter_attr=$(echo "$2" | tr '[:lower:]' '[:upper:]')
             shift
             shift
@@ -197,7 +202,8 @@ while [[ $# -gt 0 ]]; do
             shift 
             ;;
         *)
-            show_help
+            printMessage "ERROR" "Invalid syntax or parameter: $key" "="
+            exit 1
             ;;
     esac
 done
@@ -227,13 +233,13 @@ fi
 # check -filter_value
 if [ ! -z "$filter_file" ] && [ -z "$filter_attr" ]; then
     printMessage "ERROR" "-filter_attr is required for -filter_file" "="
-    show_help
+    exit 1
 fi
 
 # check -filter_file
 if [ ! -z "$filter_file" ] && [ ! -f "$filter_file" ]; then
     printMessage "ERROR" "The file $filter_file provided in -filter_file don't exist." "=" 
-    show_help
+    exit 1
 fi
 
 # check -group_by
@@ -253,19 +259,19 @@ fi
 # check -save_filter
 if [ ! -z "$SAVE_FILTER_FILE" ] && [[ ! "$SAVE_FILTER_FILE" =~ $SUPPORTED_FILE_CHARACTERS ]]; then
     printMessage "ERROR" "-save_filter cannot have special characters." "="
-    show_help
+    exit 1
 elif [ -f "$SAVE_FILTER_FILE" ]; then
     printMessage "ERROR" "The file name provided in -save_filter already exists." "="
-    show_help
+    exit 1
 fi
 
 # check -csv
 if [ ! -z "$CSV_OUTPUT_FILE" ] && [[ ! "$CSV_OUTPUT_FILE" =~ $SUPPORTED_FILE_CHARACTERS ]]; then
     printMessage "ERROR" "-csv file name cannot have special characters." "="
-    show_help
+    exit 1
 elif [ -f "$CSV_OUTPUT_FILE" ]; then
     printMessage "ERROR" "The file name provided in -csv already exists." "="
-    show_help
+    exit 1
 fi
 
 # check -csv_delimiter
@@ -277,22 +283,25 @@ if [ "$resultFormat" = "csv" ] && [ -z "$CSV_OUTPUT_FILE" ]; then
  CSV_OUTPUT_FILE="result_${FILE_DATE}.csv"
 fi
 
+# set default value for -end parameter
+if [ ! -z "$BEGIN_TIMESTAMP" ] && [ -z "$END_TIMESTAMP" ]; then
+ END_TIMESTAMP=$(date +"%d-%b-%Y %H:%M:%S" | tr '[:lower:]' '[:upper:]')
+ printMessage "WARNING" "-begin used without -end. Using default: $END_TIMESTAMP" "."
+fi
+
+# set default value for -begin parameter
+if [ ! -z "$END_TIMESTAMP" ] && [ -z "$BEGIN_TIMESTAMP" ]; then
+ if [[ "$OS_TYPE" == "Linux" ]]; then
+  BEGIN_TIMESTAMP=$(date -d "1970-01-01" +"%d-%b-%Y %H:%M:%S" | tr '[:lower:]' '[:upper:]')
+ else
+  BEGIN_TIMESTAMP=$(date -r 0 +"%d-%b-%Y %H:%M:%S" | tr '[:lower:]' '[:upper:]')
+ fi 
+ printMessage "WARNING" "-end used without -begin. Using default: $BEGIN_TIMESTAMP" "."
+fi
 
 # define interval from '1970-01-01' to current date if timestamp filter was not used.
-OS_TYPE=$(uname)
-if [[ "$OS_TYPE" == "Linux" ]]; then
-
-  if [ -z "$BEGIN_TIMESTAMP" ]; then
-    _start_timestamp=$(date -d "1970-01-01" +'%Y%m%d%H%M%S')
-    _end_timestamp=$(date +'%Y%m%d%H%M%S')
-  else
-    _start_timestamp=$(date -d "$BEGIN_TIMESTAMP" "+%Y%m%d%H%M%S")
-    _end_timestamp=$(date -d "$END_TIMESTAMP" "+%Y%m%d%H%M%S")
-  fi
-
-
-elif [[ "$OS_TYPE" == "Darwin" ]]; then
-
+if [[ "$OS_TYPE" == "Darwin" ]]; then
+ # Mac OS
   if [ -z "$BEGIN_TIMESTAMP" ]; then
     _start_timestamp=$(date -j -f "%d-%b-%Y %H:%M:%S" "1970-01-01 00:00:00" "+%Y%m%d%H%M%S")
     _end_timestamp=$(date +'%Y%m%d%H%M%S')
@@ -302,7 +311,15 @@ elif [[ "$OS_TYPE" == "Darwin" ]]; then
   fi
 
 else
-    echo "OS not supported: $os_name"
+ # Linux and others
+   if [ -z "$BEGIN_TIMESTAMP" ]; then
+    _start_timestamp=$(date -d "1970-01-01" +'%Y%m%d%H%M%S')
+    _end_timestamp=$(date +'%Y%m%d%H%M%S')
+  else
+    _start_timestamp=$(date -d "$BEGIN_TIMESTAMP" "+%Y%m%d%H%M%S")
+    _end_timestamp=$(date -d "$END_TIMESTAMP" "+%Y%m%d%H%M%S")
+  fi
+
 fi
 
 
@@ -508,7 +525,7 @@ echo "Log Type.............: $LOG_TYPE"
 echo "Filter...............: $filter"
 echo "Filter file..........: $filter_file"
 echo "Filter attr..........: $filter_attr"
-echo "Save Filter..........:"
+echo "Save Filter..........: $SAVE_FILTER_FILE"
 echo "Log Timestamp Begin..: $BEGIN_TIMESTAMP"
 echo "Log Timestamp End....: $END_TIMESTAMP"
 echo "Group By Column......: $group_by"
@@ -553,7 +570,9 @@ if [ ! -z "$filter_attr" ] && [ ! -z "$filter_file" ]; then
 
  while IFS= read -r filter_line; do
     printMessage "INFO" "Including lines where $filter_attr=$filter_line"
-    grep "'$_local_filter_attr=$filter_line'" "$CONNECTIONS_FILE" >> $CONNECTIONS_FILE.filter
+
+    escapedFilter=$(getEscaped "$_local_filter_attr=$filter_line")
+    grep "$escapedFilter" "$CONNECTIONS_FILE" >> $CONNECTIONS_FILE.filter
  done < "$filter_file"
  
  cat $CONNECTIONS_FILE.filter > $CONNECTIONS_FILE
@@ -580,7 +599,6 @@ if [ ! -z "$filter" ]; then
    attr="HOST"
   fi
   
-  #escapedFilter=$(echo "$attr=$value" | sed 's/\\/\\\\/g')
   escapedFilter=$(getEscaped "$attr=$value")
   grep "$escapedFilter" $CONNECTIONS_FILE > $CONNECTIONS_FILE.filter
   cat $CONNECTIONS_FILE.filter > $CONNECTIONS_FILE
@@ -596,7 +614,7 @@ fi
 
 # apply timestamp filter, this filter must be the latest because it is CPU bound
 if [ ! -z "$BEGIN_TIMESTAMP" ] && [ ! -z "$END_TIMESTAMP" ]; then
- 
+
  printMessage "INFO" "Applying timestamp filter from '$BEGIN_TIMESTAMP' to '$END_TIMESTAMP'"
  
  lines=$(applyIntervalFilter "$BEGIN_TIMESTAMP" "$END_TIMESTAMP" $CONNECTIONS_FILE)
@@ -660,7 +678,7 @@ fi
 
 if [ "$group_by" == "TIMESTAMP" ]; then
  # output ordered by timestamp
- sort  $COUNT_HELPER_FILE_STAGE >> $COUNT_HELPER_FILE
+ sort -k1.8,1.11n -k1.4,1.6M -k1.1,1.2n $COUNT_HELPER_FILE_STAGE >> $COUNT_HELPER_FILE
 else
  # output oreded by connections count
  sort -t '|' -r -k 2n $COUNT_HELPER_FILE_STAGE >> $COUNT_HELPER_FILE
