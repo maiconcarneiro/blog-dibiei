@@ -1,9 +1,10 @@
 #!/bin/bash
-# lsnr_miner.sh - v1.21
+# lsnr_miner.sh - v1.22
 # Script to analyze Oracle Listener log file by applying advanced filters and provide connection count at different levels.
 #
 # https://raw.githubusercontent.com/maiconcarneiro/blog-dibiei/main/lsnr_miner.sh
-# 
+# https://dibiei.blog/2024/09/13/script-lsnr_miner-sh-minerando-log-do-listener-do-oracle/
+#
 # Author: Maicon Carneiro (dibiei.blog)
 #
 # Date       | Author             | Change
@@ -16,7 +17,7 @@
 # 12/09/2024 | Maicon Carneiro    | Support for values with "\" bar during counting 
 # 12/09/2024 | Maicon Carneiro    | Support for MacOS (Darwin) with bash 3.0
 
-VERSION="v1.21"
+VERSION="v1.22"
 OS_TYPE=$(uname)
 FILE_DATE=$(date +'%H%M%S')
 CURRENT_DIR=$(pwd)
@@ -114,6 +115,8 @@ show_help() {
                          
        -csv_delimiter -> Allow specify an custom CSV delimiter (default is ',').
        
+       Examples:
+       https://dibiei.blog/2024/09/13/script-lsnr_miner-sh-minerando-log-do-listener-do-oracle/
       "
     exit 1
 }
