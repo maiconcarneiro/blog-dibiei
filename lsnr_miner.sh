@@ -1,5 +1,5 @@
 #!/bin/bash
-# lsnr_miner.sh - v1.18
+# lsnr_miner.sh - v1.20
 # Script to analyze Oracle Listener log file by applying advanced filters and provide connection count at different levels.
 #
 # https://raw.githubusercontent.com/maiconcarneiro/blog-dibiei/main/lsnr_miner.sh
@@ -16,7 +16,7 @@
 # 12/09/2024 | Maicon Carneiro    | Support for values with "\" bar during counting 
 # 12/09/2024 | Maicon Carneiro    | Support for MacOS (Darwin) with bash 3.0
 
-VERSION="v1.18"
+VERSION="v1.20"
 OS_TYPE=$(uname)
 FILE_DATE=$(date +'%H%M%S')
 CURRENT_DIR=$(pwd)
@@ -122,6 +122,11 @@ show_help() {
 
 if [[ ! "$OS_TYPE" =~ ^(Linux|Darwin)$ ]]; then
   printMessage "WARNING" "The OS $OS_TYPE is not supported and can cause unexpected behavior." "."
+fi
+
+if [ "$1" = "-v" ]; then
+    echo "Version: $VERSION"
+    exit 0
 fi
 
 if [ $# -lt 2 ]; then
