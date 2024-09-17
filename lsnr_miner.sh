@@ -1,5 +1,5 @@
 #!/bin/bash
-# lsnr_miner.sh - v1.22
+# lsnr_miner.sh - v1.23
 # Script to analyze Oracle Listener log file by applying advanced filters and provide connection count at different levels.
 #
 # https://raw.githubusercontent.com/maiconcarneiro/blog-dibiei/main/lsnr_miner.sh
@@ -17,7 +17,7 @@
 # 12/09/2024 | Maicon Carneiro    | Support for values with "\" bar during counting 
 # 12/09/2024 | Maicon Carneiro    | Support for MacOS (Darwin) with bash 3.0
 
-VERSION="v1.22"
+VERSION="v1.23"
 OS_TYPE=$(uname)
 FILE_DATE=$(date +'%H%M%S')
 CURRENT_DIR=$(pwd)
@@ -45,7 +45,7 @@ resultFormat="Table"
 CSV_DELIMITER=","
 FILTER_ONLY=""
 
-SUPPORTED_FILE_CHARACTERS='^[a-zA-Z0-9_.-/]+$'
+SUPPORTED_FILE_CHARACTERS='^[-a-zA-Z0-9_.\/]+$'
 SUPPORTED_ATTR="IP|HOST|PROGRAM|USER|SERVICE_NAME"
 SUPPORTED_TIMESTAMP_FORMAT="'DD-MON-YYYY' | 'DD-MON-YYYY HH' | 'DD-MON-YYYY HH:MI' | 'DD-MON-YYYY HH:MI:SS'"
 
@@ -265,7 +265,7 @@ if [ ! -z "$group_format"  ]; then
 fi
 
 # check -save_filter
-if [ ! -z "$SAVE_FILTER_FILE" ] && [[ ! "$SAVE_FILTER_FILE" =~ $SUPPORTED_FILE_CHARACTERS ]]; then
+if [ ! -z "$SAVE_FILTER_FILE" ] && ! echo "$SAVE_FILTER_FILE" | grep -qE "$SUPPORTED_FILE_CHARACTERS"; then
     printMessage "ERROR" "-save_filter cannot have special characters." "="
     exit 1
 elif [ -f "$SAVE_FILTER_FILE" ]; then
@@ -274,7 +274,7 @@ elif [ -f "$SAVE_FILTER_FILE" ]; then
 fi
 
 # check -csv
-if [ ! -z "$CSV_OUTPUT_FILE" ] && [[ ! "$CSV_OUTPUT_FILE" =~ $SUPPORTED_FILE_CHARACTERS ]]; then
+if [ ! -z "$CSV_OUTPUT_FILE" ] && ! echo "$CSV_OUTPUT_FILE" | grep -qE "$SUPPORTED_FILE_CHARACTERS"; then
     printMessage "ERROR" "-csv file name cannot have special characters." "="
     exit 1
 elif [ -f "$CSV_OUTPUT_FILE" ]; then
