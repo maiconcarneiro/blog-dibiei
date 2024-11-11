@@ -1,6 +1,7 @@
 /*
  Script: create_sqlpatch_hint.sql
- 
+ Available here: https://github.com/maiconcarneiro/blog-dibiei/blob/main/create_sqlpatch_hint.sql
+
  This script can create a SQL Patch for an SQL ID using the specified hint
  The code was adjusted and tested to work properly in versions 11.2 to 19c.
  The script will be search the SQL_TEXT for the SQL_ID in CursorCache, AWR and STS respectivelly.
