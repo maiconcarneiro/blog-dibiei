@@ -1,6 +1,8 @@
 #!/bin/bash
 # Script: oop_listener_helper.sh
-# Maicon Carneiro (dibiei.blog)
+# Latest version: https://github.com/maiconcarneiro/blog-dibiei/blob/main/oop_listener_helper.sh
+#
+# Author: Maicon Carneiro (dibiei.blog)
 #
 ### Examples:
 # Move listener between Oracle Homes and update static service in listener.ora of DB Home:
