@@ -4,7 +4,7 @@
 
  This script can create a SQL Patch for an SQL ID using the specified hint
  The code was adjusted and tested to work properly in versions 11.2 to 19c.
- The script will be search the SQL_TEXT for the SQL_ID in CursorCache, AWR and STS respectivelly.
+ The script will search the SQL_TEXT for the SQL_ID in CursorCache, AWR and STS respectivelly.
  You can disable the AWR and or STS option chaning the vUseAWR and vUseSTS variables.
 
  Syntax:
