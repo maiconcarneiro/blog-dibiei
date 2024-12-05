@@ -16,7 +16,7 @@
 #    -update -reload
 #
 # Run script as root to modify listener of "grid" user
-#  su - grid -c "/tmp/oop_listener_helper.sh -sourcehome <source_dbhome> -desthome <target_dbhome> -listener_home /u01/app/product/19.0.0/GI1922 -update -reload"
+#  su - grid -c "/tmp/oop_listener_helper.sh -sourcehome <source_dbhome> -desthome <target_dbhome> -listener_home <grid_home> -update -reload"
 
 
 BKPHOUR=$(date '+%Y%m%d_%H-%M-%S')
