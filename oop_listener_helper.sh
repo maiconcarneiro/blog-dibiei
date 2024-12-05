@@ -6,9 +6,9 @@
 #
 ### Examples:
 # Move listener between Oracle Homes and update static service in listener.ora of DB Home:
-#  ./oop_listener_helper.sh -sourcehome /u01/app/oracle/product/19.0.0/DB1922 -desthome /u01/app/oracle/product/19.0.0/DB1921 -move
+#  ./oop_listener_helper.sh -sourcehome /u01/app/oracle/product/19.0.0/DB1922 -desthome /u01/app/oracle/product/19.0.0/DB1921 -copy -update -move
 #
-# update static service in listener.ora of Grid Home and reload the listener, without move them:
+# update static service in listener.ora of Grid Home and reload the listener, without move it:
 #  ./oop_listener_helper.sh \
 #    -sourcehome /u01/app/oracle/product/19.22.0.0/dbhome_1 \
 #    -desthome /u01/app/oracle/product/19.25.0.0/dbhome_1 \
